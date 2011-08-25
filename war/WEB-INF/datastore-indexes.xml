@@ -1,0 +1,8 @@
+<datastore-indexes autoGenerate="false">
+
+    <datastore-index kind="ballot-entity" ancestor="false">
+        <property name="user-id" direction="asc"/>
+        <property name="modified" direction="desc"/>
+    </datastore-index>
+
+</datastore-indexes>
