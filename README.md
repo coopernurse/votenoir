@@ -8,4 +8,8 @@
     ;; To stop / start
     (ae/stop)
     (ae/serve app/votenoir-app)
-    
+
+## Pushing to App Engine ##
+
+    lein appengine-prepare
+    ~/bin/appengine-java-sdk-1.5.3/bin/appcfg.sh update war
