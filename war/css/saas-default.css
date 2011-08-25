@@ -1,0 +1,5 @@
+@charset "utf-8";
+
+.header {
+	background: url(../images/default/bg-header.jpg) repeat-x left bottom;
+}

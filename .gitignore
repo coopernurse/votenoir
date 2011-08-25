@@ -7,3 +7,4 @@ pom.xml
 .idea
 *.iml
 war/WEB-INF/appengine-generated/
+tmp/

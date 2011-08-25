@@ -1,0 +1,17 @@
+@charset "utf-8";
+
+div.postbox-container {
+	float: none;
+	padding: 0;
+	min-width: 850px;
+	width: 100%;
+}
+
+div.postbox div.inside {
+	margin: 14px 18px 18px;
+	position: relative;
+}
+
+div.postbox textarea {
+	width: 100%;
+}
