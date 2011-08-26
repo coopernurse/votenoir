@@ -2,7 +2,6 @@
   (:gen-class :extends javax.servlet.http.HttpServlet)
   (:require [votenoir.requtil :as requtil])
   (:require [noir.util.gae :as noir-gae])
-  (:require [noir.server :as server])
   (:require [appengine-magic.core :as ae])
   (:use [appengine-magic.servlet :only [make-servlet-service-method]]))
 
