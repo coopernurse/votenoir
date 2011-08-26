@@ -226,9 +226,9 @@
       [:div "You have no ballots"]
       (ballot-table ballots true))
     [:h3 "Ballots You've Voted On"]
-    (if (= 0 (count ballots))
-      [:div "You have no ballots"]
-      (ballot-table ballots false))
+    (if (= 0 (count votes))
+      [:div "You have no votes"]
+      (ballot-table votes false))
   ))
 
 (defpartial add-edit-ballot-view [b]

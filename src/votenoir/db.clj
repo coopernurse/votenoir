@@ -61,7 +61,7 @@
 
 (defn get-ballots-voted-on-by-user-id
   [user-id]
-  (map (fn [v] (let [b (get-ballot-by-id (:ballot-id v))] (assoc v :name (:name b)))) (get-votes-by-user-id user-id)))
+  (map (fn [v] (let [b (get-ballot-by-id (:ballot-id v))] (assoc v :name (:name b) :id (:id b)))) (get-votes-by-user-id user-id)))
 
 (defn put-vote
   "Saves vote for a single person, replacing the previous vote for that person
