@@ -84,16 +84,16 @@
         [:br]
         [:a {:href "https://github.com/gcv/appengine-magic" } "appengine-magic"]]]
       [:div
-       [:h3 "Connect with Me" ]
+       [:h3 "Connect with James" ]
        [:ul {:class "social-links"}
          [:li [:a {:href "http://twitter.com/coopernurse"} [:img {:src "/images/i_socialTwitter.png"}]]]
          [:li [:a {:href "http://linkedin.com/profile/view?id=33660"} [:img {:src "/images/i_socialLinkedin.png"}]]]
          [:br]
-         [:li [:a {:href "https://github.com/coopernurse/noirvote"} "See the code at github" ]]
+         [:li [:a {:href "https://github.com/coopernurse/votenoir"} "See the code at github" ]]
          ]]
       [:div
        [:h3 "Voting stuff" ]
-       [:a {:href "http://en.wikipedia.org/wiki/Condorcet_method" } "Condorcet method"]
+       [:a {:href "http://en.wikipedia.org/wiki/Condorcet_method" } "Condorcet Method"]
        [:br]
        [:a {:href "http://en.wikipedia.org/wiki/Ranked_pairs" } "Ranked Pairs"]
        ]]]])
@@ -101,7 +101,7 @@
 (defpartial layout [title & content]
   (html5
     [:head
-     [:title (str "clj-vote - " title)]
+     [:title (str "votenoir - " title)]
      (include-css "/css/saas-common.css" "/css/saas-default.css")
      (include-js  "/js/jquery/jquery.js?ver=1.4.2" "/js/easySlider1.5.js?ver=3.0"
                   "/js/saas.js?ver=3.0" "/js/jquery.cookie.min.js?ver=3.0"
