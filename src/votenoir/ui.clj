@@ -1,11 +1,15 @@
 (ns votenoir.ui
-  (:use [noir.core :only (defpage defpartial render)])
+  (:use [noir.core :only (defpage defpartial render pre-route)])
+  (:use [hiccup.core :only (resolve-uri)])
   (:use [hiccup.page-helpers])
   (:use [hiccup.form-helpers])
   (:require [noir.validation :as vali])
   (:require [noir.cookies :as cookies])
+  (:require [noir.response :as response])
+  (:require [votenoir.requtil :as requtil])
   (:require [votenoir.db :as db])
-  (:require [vote.condorcet :as condorcet]))
+  (:require [vote.condorcet :as condorcet])
+  (:require [appengine-magic.services.user :as user]))
 
 (defmacro dbg[x] `(let [x# ~x] (println '~x "=" x#) x#))
 
@@ -17,8 +21,7 @@
   [xs]
   (clojure.string/join "\n" xs))
 
-(defn create-uuid
-  []
+(defn create-uuid []
   (.toString (java.util.UUID/randomUUID)))
 
 (defn create-user-id []
@@ -27,10 +30,13 @@
     id))
 
 (defn get-create-user-id []
-  (let [id (cookies/get :user-id)]
-    (if (nil? id)
-      (create-user-id)
-      id)))
+  (cond
+    (and (user/user-logged-in?) (not (nil? (.getUserId (user/current-user))))) (.getUserId (user/current-user))
+    (nil? (cookies/get :user-id)) (create-user-id)
+    :else (cookies/get :user-id)))
+
+(defn ballot-vote-url [b]
+  (requtil/absolute-url (str "/vote/" (:id b))))
 
 (defn distinct-param-ids [params]
   (distinct (filter #(not (nil? %)) (map (fn [z] (second (clojure.string/split (str z) #"-"))) (keys params)))))
@@ -45,23 +51,26 @@
 ;; ui components ;;
 ;;;;;;;;;;;;;;;;;;;
 
-(defpartial top-nav [title]
+(defpartial header [title]
   [:div {:class "header"}
    [:div
     [:div {:class "center"}
      [:div {:class "topLinks"}
       [:div {:class "menu-top-links-container"}
        [:ul {:id "menu-top-links" :class "menu"}
-;        [:li {:class "menu-item"} [:a {:href "about.html"} "About"]]
+        (if (user/user-logged-in?)
+          (list
+          [:li {:class "menu-item"} "Logged in as: " (user/current-user)]
+          [:li {:class "menu-item"} [:a {:href "/logout"} "Logout"]]))
         ]]]
      [:h1 {:id "logo"}
-      [:img {:src "/images/logo.png" :alt "logo"}]]
+      [:a {:href "/"} [:img {:src "/images/logo.png" :alt "logo"}]] ]
      [:div {:class "nav"}
       [:div {:class "menu-main-nav-container"}
        [:ul {:id "menu-main-nav" :class "menu"}
         [:li {:class "menu-item"}
-         [:a {:href "/ballots"} [:span "My Ballots"]]
-         [:a {:href "/add-ballot"} [:span "Create Ballot"]]
+         [:a {:href "/secure/ballots"} [:span "My Ballots"]]
+         [:a {:href "/secure/add-ballot"} [:span "Create Ballot"]]
          ]]]]
      [:div {:class "page-title"}
       [:div
@@ -89,39 +98,38 @@
          [:li [:a {:href "http://twitter.com/coopernurse"} [:img {:src "/images/i_socialTwitter.png"}]]]
          [:li [:a {:href "http://linkedin.com/profile/view?id=33660"} [:img {:src "/images/i_socialLinkedin.png"}]]]
          [:br]
-         [:li [:a {:href "https://github.com/coopernurse/votenoir"} "See the code at github" ]]
+         [:li [:a {:href "http://www.bitmechanic.com/"} "my blog" ]]
+         [:br]
+         [:li [:a {:href "http://bookfriend.me/"} "my nook and kindle book sharing site" ]]
          ]]
       [:div
        [:h3 "Voting stuff" ]
        [:a {:href "http://en.wikipedia.org/wiki/Condorcet_method" } "Condorcet Method"]
        [:br]
        [:a {:href "http://en.wikipedia.org/wiki/Ranked_pairs" } "Ranked Pairs"]
-       ]]]])
+       [:br]
+       [:a {:href "https://github.com/coopernurse/votenoir"} "Source code for this site" ]]]]])
+
+(defpartial body [content]
+  [:div {:class "container"}
+   [:div {:class "center"}
+    [:div {:class "sidebar right"} ]
+     [:div {:class "content"}
+      [:div content ]]]])
 
 (defpartial layout [title & content]
   (html5
     [:head
      [:title (str "votenoir - " title)]
      (include-css "/css/saas-common.css" "/css/saas-default.css")
-     (include-js  "/js/jquery/jquery.js?ver=1.4.2" "/js/easySlider1.5.js?ver=3.0"
-                  "/js/saas.js?ver=3.0" "/js/jquery.cookie.min.js?ver=3.0"
-                  "/js/saas.twitter.js?ver=3.0")
-    ]
+     (include-js  "/js/jquery/jquery.js?ver=1.4.2"
+                  "/js/saas.js?ver=3.0"
+                  "/js/jquery.cookie.min.js?ver=3.0"
+                  "/js/jquery.socialbutton.js")]
     [:body
-     (top-nav title)
-     [:div {:class "container"}
-      [:div {:class "center"}
-       [:div {:class "sidebar right"} ]
-;        [:div {:class "widget contacts"}
-;         [:h2 "more info"]
-;         [:ul
-;          [:li "foo"]]]]
-       [:div {:class "content"}
-        [:div content ]]]]
-     (footer)
-     ]))
-;     [:div [:a {:href "/ballots"} "view ballots"]]
-;    ]))
+     (header title)
+     (body content)
+     (footer)]))
 
 (defpartial error-item [[first-error]]
   [:p.error first-error])
@@ -144,33 +152,39 @@
     [:span
      [:input {:type "submit" :value label } ]]]])
 
-(defpartial ballot-table-row [b]
+(defpartial ballot-table-row [b can-modify]
   [:tr
    [:td (:name b)]
+   [:td [:a {:href (str "/share/" (:id b))} "share"]]
    [:td [:a {:href (str "/vote/" (:id b))} "vote"]]
    [:td [:a {:href (str "/results/" (:id b))} "results"]]
-   [:td [:a {:href (str "/edit-ballot/" (:id b))} "edit"]]
-   [:td [:a {:href (str "/delete-ballot/" (:id b))} "delete"]]])
+   (if can-modify
+    (list [:td [:a {:href (str "/secure/edit-ballot/" (:id b))} "edit"]]
+          [:td [:a {:href (str "/secure/delete-ballot/" (:id b))} "delete"]]))])
 
-(defpartial ballot-table [ballots]
+(defpartial ballot-table [ballots can-modify]
   [:table {:class "ballots"}
-   [:tr [:th "Ballot name"] [:th "Vote"] [:th "View Results"] [:th "Edit"] [:th "Delete"]]
-   (map ballot-table-row ballots)])
+   [:tr [:th "Ballot name"] [:th "Share" ] [:th "Vote"] [:th "View Results"]
+    (if can-modify (list [:th "Edit"] [:th "Delete"])) ]
+   (map (fn [b] (ballot-table-row b can-modify)) ballots)])
 
 (defpartial ballot-form-fields [{:keys [name candidates]}]
   (vali/on-error :name error-item)
   (vali/on-error :candidates error-item)
   (form-row-half-left "Ballot Name:" (text-field {:class "radius input-text" :size "40"} "name" name))
   (form-row-full "Candidates (one per line):" (text-area {:class "radius input-text":rows 10 :cols 40 } "candidates" (join-newline candidates))))
-  
-(defpartial ballot-form [b]
+
+(defpartial wrap-form [action & content]
   [:div {:class "contactDiv" }
    [:div
      [:div {:class "wpcf7"}
-       (form-to {:class "wpcf7-form"} [:post "/save-ballot"]
-         (if b (hidden-field "id" (:id b)))
-         (ballot-form-fields b)
-         (submit-row "Save Ballot")) ]]])
+       (form-to {:class "wpcf7-form"} [:post action] content)]]])
+
+(defpartial ballot-form [b]
+  (wrap-form "/secure/save-ballot"
+    (if b (hidden-field "id" (:id b)))
+    (ballot-form-fields b)
+    (submit-row "Save Ballot")))
 
 (defpartial vote-candidate-field [x c]
   [:tr
@@ -189,15 +203,15 @@
    (map vote-candidate-field (iterate inc 0) candidates)])
 
 (defpartial vote-form [b]
-  (form-to [:post "/save-vote"]
+  (wrap-form "/save-vote"
     (hidden-field "id" (:id b))
     (vote-form-fields b)
-    (submit-button "vote!")))
+    (submit-row "Save Vote")))
 
 (defpartial results-view-matrix-row [pair]
   (let [matchup (first pair)]
     [:tr
-     [:td (str (first matchup) " vs " (second matchup))]
+     [:td [:b (first matchup) ] (str " beats " (second matchup))]
      [:td (second pair)]
      ]))
 
@@ -205,19 +219,35 @@
 ;; root view funcs ;;
 ;;;;;;;;;;;;;;;;;;;;;
 
-(defpartial ballots-view [ballots]
+(defpartial ballots-view [ballots votes]
   (layout "My Ballots"
-      (if (= 0 (count ballots))
-        [:div "You have no ballots"]
-        (ballot-table ballots))))
+    [:h3 "Ballots You've Created"]
+    (if (= 0 (count ballots))
+      [:div "You have no ballots"]
+      (ballot-table ballots true))
+    [:h3 "Ballots You've Voted On"]
+    (if (= 0 (count ballots))
+      [:div "You have no ballots"]
+      (ballot-table ballots false))
+  ))
 
 (defpartial add-edit-ballot-view [b]
   (layout (if b "Edit Ballot" "New Ballot")
     (ballot-form b)))
 
+(defpartial vote-upsell-view [b]
+  (let [url (ballot-vote-url b) ]
+    (layout (str "Vote On: " (:name b))
+      [:h2 "Want to login first?"]
+      [:p (list "Before you vote, you can login with your Google or Gmail account. "
+       "This will let you view polls you voted on, create new polls, and edit your vote." ) ]
+      [:h3 [:a {:href (user/login-url :destination url )} "Sounds good, let's login"] ]
+      [:h3 [:a {:href (str url "?force=1")} "No thanks, just let me vote"] ])))
+
 (defpartial vote-view [b]
   (layout (str "Vote On: " (:name b))
     [:p "Rate each option (10 = love it, 0 = hate it).  It's ok to rate options the same."]
+    [:p "If you've already voted on this ballot, this will replace your previous vote."]
     (vote-form b)))
 
 (defpartial vote-saved-view [id]
@@ -236,6 +266,39 @@
      [:tr [:th "Matchup"] [:th "Victory Margin"] ]
      (map results-view-matrix-row matrix) ]))
 
+(defpartial share-view [b]
+  (let [url (ballot-vote-url b) ]
+    (layout (:name b)
+      [:h2 "Invite others to vote"]
+      [:p "There are many ways to share your ballot."]
+      [:h3 "Email this link:"]
+      [:p url]
+      [:h3 "Share it on social media sites:" ]
+      [:div {:class "share"}
+       [:div {:id "facebook-share"}]
+       [:div {:id "twitter-share" :class "pad"} ]
+       [:div {:id "google-share" :class "pad"} ]]
+      (javascript-tag
+        (str
+          (format "jQuery('#facebook-share').socialbutton('facebook_like', { height: 10, url: '%s'});" url)
+          (format "jQuery('#twitter-share').socialbutton('twitter', { button: 'horizontal', url: '%s'});" url)
+          (format "jQuery('#google-share').socialbutton('google_plusone', { lang: 'en', href: '%s'});" url)
+        )
+      ))))
+
+(defpartial login-view []
+  (layout "Please Login"
+    [:p "We need to know who you are before you can continue." ]
+    [:h3 [:a {:href (user/login-url)} "Login with Google"]]))
+
+(defpartial home-view []
+  (layout "Make your own polls"
+    [:h2 "Welcome!" ]
+    [:p (list "This site is a fun way to create a share polls / ballots with your friends and colleagues. "
+      "After you create a ballot, you can email the link to vote, or post it to your Facebook or Twitter account.") ]
+    [:p "You need a Google or Gmail account to create a ballot, but all polls are open to the public for voting."]
+    [:h3 [:a {:href "/secure/add-ballot" } "Create a ballot now"] ]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ballot-valid? [{:keys [name candidates]}]
@@ -246,12 +309,13 @@
   (not (vali/errors? :name :candidates)))
 
 (defn save-ballot-success [ballot user-id]
-  (db/put-ballot
-    (if (:id ballot) (:id ballot) (create-uuid))
-    user-id
-    (:name ballot)
-    (split-newline (:candidates ballot)))
-  (render "/ballots" ballot))
+  (let [ballot-id (if (:id ballot) (:id ballot) (create-uuid))]
+    (db/put-ballot
+      ballot-id
+      user-id
+      (:name ballot)
+      (split-newline (:candidates ballot)))
+    (response/redirect (str "/share/" ballot-id))))
 
 (defn save-vote [vote user-id]
   (db/put-vote
@@ -264,34 +328,51 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(pre-route "/secure/*" {}
+  (when-not (user/user-logged-in?)
+   (response/redirect "/login")))
+
 (defpage "/" {:as req}
-  (layout "home"
-    [:span {:class "foo2"} "bar3"]))
+  (home-view))
 
-(defpage "/ballots" {:as req}
-  (ballots-view (db/get-ballots-by-user (get-create-user-id))))
+(defpage "/login" {:as req}
+  (login-view))
 
-(defpage "/add-ballot" {:as req}
+(defpage "/logout" {:as req}
+  (response/redirect (user/logout-url)))
+
+(defpage "/secure/ballots" {:as req}
+  (ballots-view
+    (db/get-ballots-by-user (get-create-user-id))
+    (db/get-ballots-voted-on-by-user-id (get-create-user-id))))
+
+(defpage "/secure/add-ballot" {:as req}
   (add-edit-ballot-view nil))
 
-(defpage "/edit-ballot/:id" {:keys [id]}
+(defpage "/secure/edit-ballot/:id" {:keys [id]}
   (add-edit-ballot-view (db/get-ballot-by-id id)))
 
-(defpage "/delete-ballot/:id" {:keys [id]}
+(defpage "/secure/delete-ballot/:id" {:keys [id]}
   (db/delete-ballot-by-id id (get-create-user-id))
-  (render "/ballots" nil))
+  (render "/secure/ballots" nil))
 
-(defpage [:post "/save-ballot"] {:as ballot}
+(defpage [:post "/secure/save-ballot"] {:as ballot}
   (if (ballot-valid? ballot)
     (save-ballot-success ballot (get-create-user-id))
-    (render "/add-ballot" ballot)))
+    (render "/secure/add-ballot" ballot)))
 
-(defpage "/vote/:id" {:keys [id]}
-  (vote-view (db/get-ballot-by-id id)))
+(defpage "/vote/:id" {:keys [id force]}
+  (let [b (db/get-ballot-by-id id)]
+    (if (or (user/user-logged-in?) (= "1" force))
+      (vote-view b)
+      (vote-upsell-view b))))
 
 (defpage [:post "/save-vote"] {:as vote}
   (save-vote vote (get-create-user-id))
   (vote-saved-view (:id vote)))
+
+(defpage "/share/:id" {:keys [id]}
+  (share-view (db/get-ballot-by-id id)))
 
 (defpage "/results/:id" {:keys [id]}
   (let [b      (db/get-ballot-by-id id)

@@ -5,7 +5,7 @@
 (ds/defentity ballot-entity [^:key id, user-id, name, candidates, modified])
 
 ;; id is: ballot-id + user-id
-(ds/defentity vote-entity [^:key id, ballot-id, user-id, scores])
+(ds/defentity vote-entity [^:key id, ballot-id, user-id, scores, modified])
 
 (defn entity-to-map
   [e]
@@ -51,8 +51,20 @@
   [ballot-id]
   (map (fn [v] (read-string (:scores v))) (ds/query :kind vote-entity :filter (= :ballot-id ballot-id))))
 
+(defn get-votes-by-user-id
+  "Returns seq of maps
+  input: user id (string)
+  output: seq of maps (keys in map: :user-id, :ballot-id, :scores)"
+  [user-id]
+  (map entity-to-map
+    (ds/query :kind vote-entity :filter (= :user-id user-id) :sort [[:modified :desc]])))
+
+(defn get-ballots-voted-on-by-user-id
+  [user-id]
+  (map (fn [v] (let [b (get-ballot-by-id (:ballot-id v))] (assoc v :name (:name b)))) (get-votes-by-user-id user-id)))
+
 (defn put-vote
   "Saves vote for a single person, replacing the previous vote for that person
   input: ballot id (string), user id (string), map (key=candidate id, value=score)"
   [ballot-id user-id scores]
-  (ds/save! (vote-entity. (str ballot-id "-" user-id) ballot-id user-id (pr-str scores))))
+  (ds/save! (vote-entity. (str ballot-id "-" user-id) ballot-id user-id (pr-str scores) (System/currentTimeMillis))))

@@ -1627,6 +1627,7 @@ section,header,hgroup,footer,aside {
 table {
    width: 100%;
    border-spacing: 0;
+   padding: 15px 0 15px 0;
 }
 
 th {
@@ -1643,4 +1644,17 @@ td {
 
 div.content p {
     padding: 10px 0 10px 0;
+}
+
+div.share div {
+    padding-left: 20px;
+    padding-top: 15px;
+}
+
+div.share div.pad {
+    padding-bottom: 10px;
+}
+
+h3 {
+    padding-top: 10px;
 }

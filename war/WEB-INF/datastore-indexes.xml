@@ -5,4 +5,9 @@
         <property name="modified" direction="desc"/>
     </datastore-index>
 
+    <datastore-index kind="vote-entity" ancestor="false" source="manual">
+        <property name="user-id" direction="asc"/>
+        <property name="modified" direction="desc"/>
+    </datastore-index>
+
 </datastore-indexes>
