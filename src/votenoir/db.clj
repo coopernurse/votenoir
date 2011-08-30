@@ -1,11 +1,14 @@
 (ns votenoir.db
   (:require [appengine-magic.services.datastore :as ds]))
 
-;; candidates is a
+;; candidates is a clojure list, serialized as a string
 (ds/defentity ballot-entity [^:key id, user-id, name, candidates, modified])
 
 ;; id is: ballot-id + user-id
 (ds/defentity vote-entity [^:key id, ballot-id, user-id, scores, modified])
+
+;; id is the string key the user entered
+(ds/defentity config-entity [^:key id, value])
 
 (defn entity-to-map
   [e]
@@ -68,3 +71,25 @@
   input: ballot id (string), user id (string), map (key=candidate id, value=score)"
   [ballot-id user-id scores]
   (ds/save! (vote-entity. (str ballot-id "-" user-id) ballot-id user-id (pr-str scores) (System/currentTimeMillis))))
+
+(defn get-all-config
+  []
+  (map entity-to-map (ds/query :kind config-entity :limit 1000)))
+
+(defn get-all-config-as-map
+  []
+  (apply array-map
+    (flatten
+      (map
+        (fn [nv] (list (:id nv) (:value nv)))
+        (get-all-config)))))
+
+(defn put-config
+  [key value]
+  (ds/save! (config-entity. key value)))
+
+(defn delete-config-by-id
+  [key]
+  (let [b (ds/retrieve config-entity key)]
+    (if b
+      (ds/delete! b))))

@@ -3,12 +3,17 @@
   (:use [hiccup.core :only (resolve-uri)])
   (:use [hiccup.page-helpers])
   (:use [hiccup.form-helpers])
+  (:require [clojure.contrib.json :as json])
+  (:require [clojure.contrib.zip-filter.xml :as zx])
+  (:require [signpost.gae :as oauth])
   (:require [noir.validation :as vali])
   (:require [noir.cookies :as cookies])
   (:require [noir.response :as response])
+  (:require [noir.session :as session])
   (:require [votenoir.requtil :as requtil])
   (:require [votenoir.db :as db])
   (:require [vote.condorcet :as condorcet])
+  (:require [appengine-magic.services.url-fetch :as url-fetch])
   (:require [appengine-magic.services.user :as user]))
 
 (defmacro dbg[x] `(let [x# ~x] (println '~x "=" x#) x#))
@@ -26,14 +31,15 @@
 
 (defn create-user-id []
   (let [id (create-uuid)]
-    (cookies/put! :user-id id)
+    (cookies/put! :user-id-temp id)
     id))
 
 (defn get-create-user-id []
   (cond
     (and (user/user-logged-in?) (not (nil? (.getUserId (user/current-user))))) (.getUserId (user/current-user))
-    (nil? (cookies/get :user-id)) (create-user-id)
-    :else (cookies/get :user-id)))
+    (not (nil? (session/get :user-id))) (session/get :user-id)
+    (nil? (cookies/get :user-id-temp)) (create-user-id)
+    :else (cookies/get :user-id-temp)))
 
 (defn ballot-vote-url [b]
   (requtil/absolute-url (str "/vote/" (:id b))))
@@ -47,6 +53,14 @@
 (defn indexed-param-to-map [params k v]
   (apply array-map (apply concat (indexed-param-to-map-pairs params k v))))
 
+(defn logged-in? []
+  (or (user/user-logged-in?) (session/get :user-id)))
+
+(defn user-display-name []
+  (if (user/user-logged-in?)
+    (user/current-user)
+    (session/get :user-display-name)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ui components ;;
 ;;;;;;;;;;;;;;;;;;;
@@ -58,9 +72,9 @@
      [:div {:class "topLinks"}
       [:div {:class "menu-top-links-container"}
        [:ul {:id "menu-top-links" :class "menu"}
-        (if (user/user-logged-in?)
+        (if (logged-in?)
           (list
-          [:li {:class "menu-item"} "Logged in as: " (user/current-user)]
+          [:li {:class "menu-item"} "Logged in as: " (user-display-name)]
           [:li {:class "menu-item"} [:a {:href "/logout"} "Logout"]]))
         ]]]
      [:h1 {:id "logo"}
@@ -289,7 +303,11 @@
 (defpartial login-view []
   (layout "Please Login"
     [:p "We need to know who you are before you can continue." ]
-    [:h3 [:a {:href (user/login-url)} "Login with Google"]]))
+    [:h3 [:a {:href (user/login-url)} "Login with Google"]]
+    [:h3 [:a {:href "login-twitter"} "Login with Twitter"]]
+    [:h3 [:a {:href "login-facebook"} "Login with Facebook"]]
+    [:h3 [:a {:href "login-netflix"} "Login with Netflix"]]
+    ))
 
 (defpartial home-view []
   (layout "Make your own polls"
@@ -329,8 +347,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (pre-route "/secure/*" {}
-  (when-not (user/user-logged-in?)
+  (when-not (logged-in?)
    (response/redirect "/login")))
+
+(pre-route "/admin/*" {}
+  (if-not (logged-in?)
+    (response/redirect "/login")
+    (if-not (user/user-admin?)
+      (response/redirect "/"))))
 
 (defpage "/" {:as req}
   (home-view))
@@ -339,6 +363,8 @@
   (login-view))
 
 (defpage "/logout" {:as req}
+  (session/remove! :user-id)
+  (session/remove! :user-display-name)
   (response/redirect (user/logout-url)))
 
 (defpage "/secure/ballots" {:as req}
@@ -380,3 +406,103 @@
         matrix (condorcet/tab-ranked-pairs-matrix (:candidates b) votes)
         winner (condorcet/ranked-pairs-winner matrix)]
     (results-view b winner matrix)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; oauth ;;
+;;;;;;;;;;;
+
+(defn make-oauth-consumer [provider]
+  (let [conf (db/get-all-config-as-map)]
+    (oauth/make-consumer (conf (str provider ".key")) (conf (str provider ".secret")))))
+
+(defpage "/login-twitter" {:as req}
+  (let [consumer (make-oauth-consumer "twitter")]
+    (session/put! :oauth-consumer consumer)
+    (response/redirect
+      (oauth/get-authorize-url
+        (oauth/make-provider-twitter)
+        consumer
+        (requtil/absolute-url "/oauth-callback-twitter")))))
+
+(defpage "/login-netflix" {:as req}
+  (let [consumer (make-oauth-consumer "netflix")]
+    (session/put! :oauth-consumer consumer)
+    (response/redirect
+      (oauth/get-authorize-url
+        (oauth/make-provider-netflix consumer "votenoir")
+        consumer
+        (requtil/absolute-url "/oauth-callback-netflix")))))
+
+(defpage "/login-facebook" {:as req}
+  (let [consumer (make-oauth-consumer "facebook")]
+    (session/put! :oauth-consumer consumer)
+    (response/redirect
+      (oauth/get-authorize-url-facebook
+        consumer
+        (requtil/absolute-url "/oauth-callback-facebook")))))
+
+(defn set-logged-in-and-redirect
+  [user-json provider-name id-key name-key]
+  (let [user-map (json/read-json user-json)]
+    (session/put! :user-id (str provider-name "-" (id-key user-map)))
+    (session/put! :user-display-name (name-key user-map))
+    (response/redirect (requtil/absolute-url "/secure/ballots"))))
+
+(defpage "/oauth-callback-twitter" {:as req}
+  "We get :oauth_verifier and :oauth_token from the oauth provider
+  on this request.  stash the token in the session so we can make calls
+  on behalf of this user"
+  (let [    consumer (session/get :oauth-consumer)
+        access-token (oauth/get-access-token
+                       (oauth/make-provider-twitter) consumer (:oauth_verifier req))
+           user-json (oauth/get-protected-url
+                       consumer
+                       access-token
+                       "http://api.twitter.com/1/account/verify_credentials.json"
+                       "utf-8")]
+    (set-logged-in-and-redirect user-json "twitter" :id :name)))
+
+(defn parse-netflix-href [s]
+  (let [xp (clojure.xml/parse (java.io.ByteArrayInputStream. (.getBytes s)))]
+    (:href (:attrs (first (first (zx/xml-> (clojure.zip/xml-zip xp) :link)))))))
+
+(defn xml-first-occur [xz kw]
+  (first (:content (first (first (clojure.contrib.zip-filter.xml/xml-> xz kw))))))
+
+(defpage "/oauth-callback-netflix" {:as req}
+  (let [    consumer (session/get :oauth-consumer)
+        access-token (oauth/get-access-token
+                       (oauth/make-provider-netflix consumer "votenoir")
+                       consumer
+                       (:oauth_verifier req))
+           curr-xml  (oauth/get-protected-url
+                       consumer
+                       access-token
+                       "http://api.netflix.com/users/current"
+                       "utf-8")
+           user-xml  (oauth/get-protected-url
+                       consumer
+                       access-token
+                       (parse-netflix-href curr-xml)
+                       "utf-8")
+           user-zip  (clojure.zip/xml-zip
+                       (clojure.xml/parse
+                         (java.io.ByteArrayInputStream. (.getBytes user-xml))))]
+    (session/put! :user-id (str "netflix-" (xml-first-occur user-zip :user_id)))
+    (session/put! :user-display-name
+      (str (xml-first-occur user-zip :first_name) " "
+        (xml-first-occur user-zip :last_name)))
+    (response/redirect (requtil/absolute-url "/secure/ballots"))))
+
+(defpage "/oauth-callback-facebook" {:keys [code]}
+  "We get :oauth_verifier and :oauth_token from the oauth provider
+  on this request.  stash the token in the session so we can make calls
+  on behalf of this user"
+  (let [    consumer (session/get :oauth-consumer)
+        access-token (oauth/get-access-token-facebook consumer
+                        code (requtil/absolute-url "/oauth-callback-facebook"))
+           user-json (oauth/get-protected-url-facebook
+                       access-token "https://graph.facebook.com/me" "utf-8")]
+    (set-logged-in-and-redirect user-json "facebook" :id :name)))
+
+

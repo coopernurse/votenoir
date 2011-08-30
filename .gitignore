@@ -8,3 +8,4 @@ pom.xml
 *.iml
 war/WEB-INF/appengine-generated/
 tmp/
+oauth-keys.txt
