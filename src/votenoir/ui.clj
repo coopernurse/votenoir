@@ -5,7 +5,7 @@
   (:use [hiccup.form-helpers])
   (:require [clojure.contrib.json :as json])
   (:require [clojure.contrib.zip-filter.xml :as zx])
-  (:require [signpost.gae :as oauth])
+  (:require [clj-appengine-oauth.core :as oauth])
   (:require [noir.validation :as vali])
   (:require [noir.cookies :as cookies])
   (:require [noir.response :as response])
@@ -502,7 +502,7 @@
         access-token (oauth/get-access-token-facebook consumer
                         code (requtil/absolute-url "/oauth-callback-facebook"))
            user-json (oauth/get-protected-url-facebook
-                       access-token "https://graph.facebook.com/me" "utf-8")]
+                       (:access_token access-token) "https://graph.facebook.com/me" "utf-8")]
     (set-logged-in-and-redirect user-json "facebook" :id :name)))
 
 
