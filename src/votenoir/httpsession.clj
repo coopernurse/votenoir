@@ -6,8 +6,6 @@
 
 (declare *session*)
 
-(defmacro dbg[x] `(let [x# ~x] (println '~x "=" x#) x#))
-
 (defn serialize [obj]
   (let [bos (ByteArrayOutputStream.)]
     (with-open [oos (ObjectOutputStream. bos)]
@@ -21,13 +19,13 @@
 
 (deftype HttpSessionStore [session-key]
   SessionStore
-  (read-session [_ key]
+  (read-session [_ _]
     (let [val (.getAttribute *session* session-key)]
       (if val (deserialize val) {})))
   (write-session [_ key data]
     (.setAttribute *session* session-key (serialize data))
     key)
-  (delete-session [_ key]
+  (delete-session [_ _]
     (.removeAttribute *session* session-key)
     nil))
 
